@@ -12,6 +12,7 @@ import { HasCustomFields } from '../../config/custom-field/custom-field-types';
 import {
     PromotionAction,
     PromotionItemAction,
+    PromotionLineAction,
     PromotionOrderAction,
     PromotionShippingAction,
 } from '../../config/promotion/promotion-action';
@@ -25,6 +26,10 @@ import { ShippingLine } from '../shipping-line/shipping-line.entity';
 import { PromotionTranslation } from './promotion-translation.entity';
 
 export interface ApplyOrderItemActionArgs {
+    orderLine: OrderLine;
+}
+
+export interface ApplyOrderLineActionArgs {
     orderLine: OrderLine;
 }
 
@@ -49,7 +54,7 @@ export type PromotionTestResult = boolean | PromotionState;
  * will be applied to an Order.
  *
  * Each assigned {@link PromotionCondition} is checked against the Order, and if they all return `true`,
- * then each assign {@link PromotionItemAction} / {@link PromotionOrderAction} is applied to the Order.
+ * then each assign {@link PromotionItemAction} / {@link PromotionLineAction} / {@link PromotionOrderAction} / {@link PromotionShippingAction} is applied to the Order.
  *
  * @docsCategory entities
  */
@@ -61,7 +66,11 @@ export class Promotion
     type = AdjustmentType.PROMOTION;
     private readonly allConditions: { [code: string]: PromotionCondition } = {};
     private readonly allActions: {
-        [code: string]: PromotionItemAction | PromotionOrderAction | PromotionShippingAction;
+        [code: string]:
+            | PromotionItemAction
+            | PromotionLineAction
+            | PromotionOrderAction
+            | PromotionShippingAction;
     } = {};
 
     constructor(
@@ -139,7 +148,11 @@ export class Promotion
 
     async apply(
         ctx: RequestContext,
-        args: ApplyOrderActionArgs | ApplyOrderItemActionArgs | ApplyShippingActionArgs,
+        args:
+            | ApplyOrderActionArgs
+            | ApplyOrderItemActionArgs
+            | ApplyOrderLineActionArgs
+            | ApplyShippingActionArgs,
         state?: PromotionState,
     ): Promise<Adjustment | undefined> {
         let amount = 0;
@@ -149,6 +162,13 @@ export class Promotion
             const promotionAction = this.allActions[action.code];
             if (promotionAction instanceof PromotionItemAction) {
                 if (this.isOrderItemArg(args)) {
+                    const { orderLine } = args;
+                    amount +=
+                        roundMoney(await promotionAction.execute(ctx, orderLine, action.args, state, this)) *
+                        orderLine.quantity;
+                }
+            } else if (promotionAction instanceof PromotionLineAction) {
+                if (this.isOrderLineArg(args)) {
                     const { orderLine } = args;
                     amount += roundMoney(
                         await promotionAction.execute(ctx, orderLine, action.args, state, this),
@@ -235,6 +255,12 @@ export class Promotion
         value: ApplyOrderItemActionArgs | ApplyOrderActionArgs | ApplyShippingActionArgs,
     ): value is ApplyOrderActionArgs {
         return !this.isOrderItemArg(value) && !this.isShippingArg(value);
+    }
+
+    private isOrderLineArg(
+        value: ApplyOrderLineActionArgs | ApplyOrderActionArgs | ApplyShippingActionArgs,
+    ): value is ApplyOrderLineActionArgs {
+        return value.hasOwnProperty('orderLine');
     }
 
     private isOrderItemArg(
